@@ -32,6 +32,7 @@ from torchvision import transforms
 from models.CDCNs import Conv2d_cd, CDCN, CDCNpp
 
 from Load_OULUNPU_train import Spoofing_train, Normaliztion, ToTensor, RandomHorizontalFlip, Cutout, RandomErasing
+#from dataloaders import Spoofing_train, Normaliztion, ToTensor, RandomHorizontalFlip, Cutout, RandomErasing
 from Load_OULUNPU_valtest import Spoofing_valtest, Normaliztion_valtest, ToTensor_valtest
 
 
@@ -221,7 +222,7 @@ def train_test():
         log_file.flush()
 
         model = CDCN()
-        #model = model.cuda()
+        # model = model.cuda()
         model = model.to(device[0])
         model = nn.DataParallel(model, device_ids=device, output_device=device[0])
         model.load_state_dict(torch.load('xxx.pkl'))
@@ -246,12 +247,14 @@ def train_test():
         model = model.cuda()
         #model = model.to(device[0])
         #model = nn.DataParallel(model, device_ids=device, output_device=device[0])
+        # model.load_state_dict(torch.load(args.log+'/'+args.log+'_900.pkl'))
 
         lr = args.lr
         optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=0.00005)
         scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=args.step_size, gamma=args.gamma)
 
     print(model)
+    print("numer of params: ", sum(p.numel() for p in model.parameters() if p.requires_grad))
 
 
     criterion_absolute_loss = nn.MSELoss().cuda()
@@ -274,7 +277,7 @@ def train_test():
 
 
         ###########################################
-        '''                train             '''
+        ###                train                ###
         ###########################################
         model.train()
 
@@ -297,8 +300,9 @@ def train_test():
             absolute_loss = criterion_absolute_loss(map_x, map_label)
             contrastive_loss = criterion_contrastive_loss(map_x, map_label)
 
-            loss =  absolute_loss + contrastive_loss
-            #loss =  absolute_loss
+            loss = absolute_loss + contrastive_loss
+
+
 
             loss.backward()
 
@@ -319,7 +323,7 @@ def train_test():
                 #log_file.write('epoch:%d, mini-batch:%3d, lr=%f, Absolute_Depth_loss= %.4f, Contrastive_Depth_loss= %.4f \n' % (epoch + 1, i + 1, lr, loss_absolute.avg, loss_contra.avg))
                 #log_file.flush()
 
-            #break
+            # break
         scheduler.step()
 
         # whole epoch average
@@ -336,11 +340,12 @@ def train_test():
             epoch_test = 20
         epoch_test = 20
         if epoch % epoch_test == epoch_test-1:    # test every 5 epochs
+        if True:
             model.eval()
 
             with torch.no_grad():
                 ###########################################
-                '''                val             '''
+                ###                val                  ###
                 ###########################################
                 # val for threshold
                 val_data = Spoofing_valtest(val_list, val_image_dir, val_map_dir, transform=transforms.Compose([Normaliztion_valtest(), ToTensor_valtest()]))
@@ -356,13 +361,11 @@ def train_test():
                     optimizer.zero_grad()
 
                     #pdb.set_trace()
-                    map_score = 0.0
-                    for frame_t in range(inputs.shape[1]):
-                        map_x, embedding, x_Block1, x_Block2, x_Block3, x_input =  model(inputs[:,frame_t,:,:,:])
+                    map_x, embedding, x_Block1, x_Block2, x_Block3, x_input =  model(inputs[0])
 
-                        score_norm = torch.sum(map_x)/torch.sum(val_maps[:,frame_t,:,:])
-                        map_score += score_norm
-                    map_score = map_score/inputs.shape[1]
+                    score_norm = torch.div(torch.sum(map_x, (1,2)),torch.sum(val_maps[0], (1,2)))
+                    map_score = torch.mean(score_norm)
+
 
                     map_score_list.append('{} {}\n'.format(map_score, spoof_label[0][0]))
                     #pdb.set_trace()
@@ -370,8 +373,8 @@ def train_test():
                 with open(map_score_val_filename, 'w') as file:
                     file.writelines(map_score_list)
 
-                ###########################################
-                '''                test             '''
+                ##########################################
+                ###                test                ###
                 ##########################################
                 # test for ACC
                 test_data = Spoofing_valtest(test_list, test_image_dir, test_map_dir, transform=transforms.Compose([Normaliztion_valtest(), ToTensor_valtest()]))
@@ -387,13 +390,10 @@ def train_test():
                     optimizer.zero_grad()
 
                     #pdb.set_trace()
-                    map_score = 0.0
-                    for frame_t in range(inputs.shape[1]):
-                        map_x, embedding, x_Block1, x_Block2, x_Block3, x_input =  model(inputs[:,frame_t,:,:,:])
+                    map_x, embedding, x_Block1, x_Block2, x_Block3, x_input =  model(inputs[0])
 
-                        score_norm = torch.sum(map_x)/torch.sum(test_maps[:,frame_t,:,:])
-                        map_score += score_norm
-                    map_score = map_score/inputs.shape[1]
+                    score_norm = torch.div(torch.sum(map_x, (1,2)),torch.sum(test_maps[0], (1,2)))
+                    map_score = torch.norm(map_score)
 
                     map_score_list.append('{} {}\n'.format(map_score, spoof_label[0][0]))
 
@@ -407,17 +407,17 @@ def train_test():
                 val_threshold, test_threshold, val_ACC, val_ACER, test_ACC, test_APCER, test_BPCER, test_ACER, test_ACER_test_threshold = performances(map_score_val_filename, map_score_test_filename)
 
                 print('epoch:%d, Val:  val_threshold= %.4f, val_ACC= %.4f, val_ACER= %.4f' % (epoch + 1, val_threshold, val_ACC, val_ACER))
-                log_file.write('\n epoch:%d, Val:  val_threshold= %.4f, val_ACC= %.4f, val_ACER= %.4f \n' % (epoch + 1, val_threshold, val_ACC, val_ACER))
-
                 print('epoch:%d, Test:  ACC= %.4f, APCER= %.4f, BPCER= %.4f, ACER= %.4f' % (epoch + 1, test_ACC, test_APCER, test_BPCER, test_ACER))
+
                 #print('epoch:%d, Test:  test_threshold= %.4f, test_ACER_test_threshold= %.4f\n' % (epoch + 1, test_threshold, test_ACER_test_threshold))
+                log_file.write('\n epoch:%d, Val:  val_threshold= %.4f, val_ACC= %.4f, val_ACER= %.4f \n' % (epoch + 1, val_threshold, val_ACC, val_ACER))
                 log_file.write('epoch:%d, Test:  ACC= %.4f, APCER= %.4f, BPCER= %.4f, ACER= %.4f \n' % (epoch + 1, test_ACC, test_APCER, test_BPCER, test_ACER))
                 #log_file.write('epoch:%d, Test:  test_threshold= %.4f, test_ACER_test_threshold= %.4f \n\n' % (epoch + 1, test_threshold, test_ACER_test_threshold))
                 log_file.flush()
 
         #if epoch <1:
         # save the model until the next improvement
-        #    torch.save(model.state_dict(), args.log+'/'+args.log+'_%d.pkl' % (epoch + 1))
+            torch.save(model.state_dict(), args.log+'/'+args.log+'_%d.pkl' % (epoch + 1))
 
 
     print('Finished Training')
@@ -429,7 +429,7 @@ def train_test():
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="save quality using landmarkpose model")
-    parser.add_argument('--gpu', type=int, default=3, help='the gpu id used for predict')
+    parser.add_argument('--gpu', type=int, default=1, help='the gpu id used for predict')
     parser.add_argument('--lr', type=float, default=0.0001, help='initial learning rate')
     parser.add_argument('--batchsize', type=int, default=7, help='initial batchsize')
     parser.add_argument('--step_size', type=int, default=500, help='how many epochs lr decays once')  # 500
@@ -440,4 +440,5 @@ if __name__ == "__main__":
     parser.add_argument('--finetune', action='store_true', default=False, help='whether finetune other models')
 
     args = parser.parse_args()
+    print(args)
     train_test()
